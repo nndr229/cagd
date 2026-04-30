@@ -2,212 +2,185 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Context-Aware Gradient Descent (Robot Navigation)</title>
+<title>Context-Aware Gradient Descent</title>
 <style>
   body { margin: 0; background: #0f172a; color: white; font-family: Arial; }
   canvas { display: block; margin: auto; background: #020617; }
-  #info { text-align: center; padding: 10px; }
+  #panel { text-align: center; padding: 10px; }
 </style>
 </head>
 <body>
 
-<div id="info">
-  Context-Aware Gradient Descent (Clustering + Motion Field)
+<div id="panel">
+  <h2>Context-Aware Gradient Descent Navigation</h2>
+  <p>Clustering → Cost Field → Gradient Flow</p>
 </div>
 
-<canvas id="canvas" width="800" height="600"></canvas>
+<canvas id="canvas" width="900" height="600"></canvas>
 
 <script>
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-const WIDTH = canvas.width;
-const HEIGHT = canvas.height;
+const W = canvas.width;
+const H = canvas.height;
 
-// ---- PARAMETERS ----
-const NUM_POINTS = 120;
-const EPS = 30;
-const MIN_PTS = 4;
-const STEP_SIZE = 1.5;
+// PARAMETERS
+const NUM = 150;
+const EPS = 35;
+const MIN = 4;
+const STEP = 1.2;
 
-// ---- GENERATE RANDOM OBSTACLES ----
-let points = [];
-for (let i = 0; i < NUM_POINTS; i++) {
-  points.push({
-    x: Math.random() * WIDTH,
-    y: Math.random() * HEIGHT
-  });
+// Generate obstacles
+let pts = [];
+for (let i = 0; i < NUM; i++) {
+  pts.push({ x: Math.random() * W, y: Math.random() * H });
 }
 
-// ---- DBSCAN CLUSTERING ----
-function distance(a, b) {
+// Distance
+function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-function dbscan(points, eps, minPts) {
-  let clusters = [];
+// DBSCAN
+function dbscan() {
   let visited = new Set();
+  let clusters = [];
 
-  for (let i = 0; i < points.length; i++) {
+  for (let i = 0; i < pts.length; i++) {
     if (visited.has(i)) continue;
-
     visited.add(i);
-    let neighbors = regionQuery(points, i, eps);
 
-    if (neighbors.length < minPts) continue;
+    let neigh = region(i);
+    if (neigh.length < MIN) continue;
 
     let cluster = [];
-    expandCluster(points, i, neighbors, cluster, visited, eps, minPts);
+    expand(i, neigh, cluster, visited);
     clusters.push(cluster);
   }
   return clusters;
 }
 
-function regionQuery(points, index, eps) {
-  let neighbors = [];
-  for (let i = 0; i < points.length; i++) {
-    if (distance(points[index], points[i]) < eps) {
-      neighbors.push(i);
-    }
+function region(i) {
+  let res = [];
+  for (let j = 0; j < pts.length; j++) {
+    if (dist(pts[i], pts[j]) < EPS) res.push(j);
   }
-  return neighbors;
+  return res;
 }
 
-function expandCluster(points, index, neighbors, cluster, visited, eps, minPts) {
-  cluster.push(index);
+function expand(i, neigh, cluster, visited) {
+  cluster.push(i);
 
-  for (let i = 0; i < neighbors.length; i++) {
-    let n = neighbors[i];
+  for (let n of neigh) {
     if (!visited.has(n)) {
       visited.add(n);
-      let nNeighbors = regionQuery(points, n, eps);
-      if (nNeighbors.length >= minPts) {
-        neighbors = neighbors.concat(nNeighbors);
-      }
+      let neigh2 = region(n);
+      if (neigh2.length >= MIN) neigh = neigh.concat(neigh2);
     }
-    if (!cluster.includes(n)) {
-      cluster.push(n);
-    }
+    if (!cluster.includes(n)) cluster.push(n);
   }
 }
 
-// ---- GET CLUSTERS ----
-let clusters = dbscan(points, EPS, MIN_PTS);
-
-// ---- COMPUTE CLUSTER CENTERS ----
-function getClusterCenters(clusters) {
-  return clusters.map(cluster => {
-    let cx = 0, cy = 0;
-    cluster.forEach(i => {
-      cx += points[i].x;
-      cy += points[i].y;
-    });
-    return {
-      x: cx / cluster.length,
-      y: cy / cluster.length,
-      size: cluster.length
-    };
+// Cluster centers
+function centers(cls) {
+  return cls.map(c => {
+    let x = 0, y = 0;
+    c.forEach(i => { x += pts[i].x; y += pts[i].y; });
+    return { x: x/c.length, y: y/c.length, size: c.length };
   });
 }
 
-let clusterCenters = getClusterCenters(clusters);
+let clusters = dbscan();
+let centersList = centers(clusters);
 
-// ---- START & GOAL ----
-let pos = { x: 50, y: 50 };
-let goal = { x: WIDTH - 50, y: HEIGHT - 50 };
-
+// Start & goal
+let pos = { x: 60, y: 60 };
+let goal = { x: W - 60, y: H - 60 };
 let path = [];
 
-// ---- COST GRADIENT ----
-function computeGradient(p) {
-  let gx = 0, gy = 0;
+// Gradient
+function grad(p) {
+  let gx = (p.x - goal.x);
+  let gy = (p.y - goal.y);
 
-  // --- Goal attraction ---
-  gx += (p.x - goal.x);
-  gy += (p.y - goal.y);
-
-  // --- Cluster-based repulsion ---
-  clusterCenters.forEach(c => {
+  centersList.forEach(c => {
     let dx = p.x - c.x;
     let dy = p.y - c.y;
     let d = Math.hypot(dx, dy) + 0.01;
 
-    let strength = c.size * 2000 / (d * d);
-
-    gx += strength * (dx / d);
-    gy += strength * (dy / d);
+    let force = c.size * 1500 / (dd);
+    gx += force * (dx/d);
+    gy += force * (dy/d);
   });
 
   return { x: gx, y: gy };
 }
 
-// ---- SIMULATION LOOP ----
-function step() {
-  let grad = computeGradient(pos);
-
-  pos.x -= STEP_SIZE * grad.x * 0.01;
-  pos.y -= STEP_SIZE * grad.y * 0.01;
-
-  path.push({ x: pos.x, y: pos.y });
+// Step
+function update() {
+  let g = grad(pos);
+  pos.x -= STEP * g.x * 0.01;
+  pos.y -= STEP * g.y * 0.01;
+  path.push({ ...pos });
 }
 
-// ---- DRAW ----
+// Draw
 function draw() {
-  ctx.clearRect(0, 0, WIDTH, HEIGHT);
+  ctx.clearRect(0, 0, W, H);
 
-  // Draw points
-  ctx.fillStyle = "#475569";
-  points.forEach(p => {
+  // Points
+  ctx.fillStyle = "#64748b";
+  pts.forEach(p => {
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, 2, 0, 2Math.PI);
     ctx.fill();
   });
 
-  // Draw clusters
-  clusterCenters.forEach(c => {
-    ctx.fillStyle = "rgba(255,0,0,0.2)";
+  // Clusters
+  centersList.forEach(c => {
+    ctx.fillStyle = "rgba(255,80,80,0.2)";
     ctx.beginPath();
-    ctx.arc(c.x, c.y, 10 + c.size, 0, Math.PI * 2);
+    ctx.arc(c.x, c.y, 8 + c.size, 0, 2Math.PI);
     ctx.fill();
   });
 
-  // Draw path
+  // Path
   ctx.strokeStyle = "#22c55e";
   ctx.beginPath();
-  for (let i = 0; i < path.length; i++) {
-    let p = path[i];
+  path.forEach((p,i) => {
     if (i === 0) ctx.moveTo(p.x, p.y);
     else ctx.lineTo(p.x, p.y);
-  }
+  });
   ctx.stroke();
 
-  // Draw start & goal
+  // Start
   ctx.fillStyle = "#3b82f6";
   ctx.beginPath();
-  ctx.arc(50, 50, 6, 0, Math.PI * 2);
+  ctx.arc(60, 60, 6, 0, 2Math.PI);
   ctx.fill();
 
+  // Goal
   ctx.fillStyle = "#facc15";
   ctx.beginPath();
-  ctx.arc(goal.x, goal.y, 6, 0, Math.PI * 2);
+  ctx.arc(goal.x, goal.y, 6, 0, 2Math.PI);
   ctx.fill();
 
   // Robot
   ctx.fillStyle = "#22c55e";
   ctx.beginPath();
-  ctx.arc(pos.x, pos.y, 5, 0, Math.PI * 2);
+  ctx.arc(pos.x, pos.y, 5, 0, 2Math.PI);
   ctx.fill();
 }
 
-// ---- LOOP ----
-function animate() {
-  for (let i = 0; i < 3; i++) step();
+// Loop
+function loop() {
+  for (let i = 0; i < 3; i++) update();
   draw();
-  requestAnimationFrame(animate);
+  requestAnimationFrame(loop);
 }
 
-animate();
-
+loop();
 </script>
 
 </body>
