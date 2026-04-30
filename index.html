@@ -1,1 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Context-Aware Gradient Descent (Robot Navigation)</title>
+<style>
+  body { margin: 0; background: #0f172a; color: white; font-family: Arial; }
+  canvas { display: block; margin: auto; background: #020617; }
+  #info { text-align: center; padding: 10px; }
+</style>
+</head>
+<body>
 
+<div id="info">
+  Context-Aware Gradient Descent (Clustering + Motion Field)
+</div>
+
+<canvas id="canvas" width="800" height="600"></canvas>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const WIDTH = canvas.width;
+const HEIGHT = canvas.height;
+
+// ---- PARAMETERS ----
+const NUM_POINTS = 120;
+const EPS = 30;
+const MIN_PTS = 4;
+const STEP_SIZE = 1.5;
+
+// ---- GENERATE RANDOM OBSTACLES ----
+let points = [];
+for (let i = 0; i < NUM_POINTS; i++) {
+  points.push({
+    x: Math.random() * WIDTH,
+    y: Math.random() * HEIGHT
+  });
+}
+
+// ---- DBSCAN CLUSTERING ----
+function distance(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function dbscan(points, eps, minPts) {
+  let clusters = [];
+  let visited = new Set();
+
+  for (let i = 0; i < points.length; i++) {
+    if (visited.has(i)) continue;
+
+    visited.add(i);
+    let neighbors = regionQuery(points, i, eps);
+
+    if (neighbors.length < minPts) continue;
+
+    let cluster = [];
+    expandCluster(points, i, neighbors, cluster, visited, eps, minPts);
+    clusters.push(cluster);
+  }
+  return clusters;
+}
+
+function regionQuery(points, index, eps) {
+  let neighbors = [];
+  for (let i = 0; i < points.length; i++) {
+    if (distance(points[index], points[i]) < eps) {
+      neighbors.push(i);
+    }
+  }
+  return neighbors;
+}
+
+function expandCluster(points, index, neighbors, cluster, visited, eps, minPts) {
+  cluster.push(index);
+
+  for (let i = 0; i < neighbors.length; i++) {
+    let n = neighbors[i];
+    if (!visited.has(n)) {
+      visited.add(n);
+      let nNeighbors = regionQuery(points, n, eps);
+      if (nNeighbors.length >= minPts) {
+        neighbors = neighbors.concat(nNeighbors);
+      }
+    }
+    if (!cluster.includes(n)) {
+      cluster.push(n);
+    }
+  }
+}
+
+// ---- GET CLUSTERS ----
+let clusters = dbscan(points, EPS, MIN_PTS);
+
+// ---- COMPUTE CLUSTER CENTERS ----
+function getClusterCenters(clusters) {
+  return clusters.map(cluster => {
+    let cx = 0, cy = 0;
+    cluster.forEach(i => {
+      cx += points[i].x;
+      cy += points[i].y;
+    });
+    return {
+      x: cx / cluster.length,
+      y: cy / cluster.length,
+      size: cluster.length
+    };
+  });
+}
+
+let clusterCenters = getClusterCenters(clusters);
+
+// ---- START & GOAL ----
+let pos = { x: 50, y: 50 };
+let goal = { x: WIDTH - 50, y: HEIGHT - 50 };
+
+let path = [];
+
+// ---- COST GRADIENT ----
+function computeGradient(p) {
+  let gx = 0, gy = 0;
+
+  // --- Goal attraction ---
+  gx += (p.x - goal.x);
+  gy += (p.y - goal.y);
+
+  // --- Cluster-based repulsion ---
+  clusterCenters.forEach(c => {
+    let dx = p.x - c.x;
+    let dy = p.y - c.y;
+    let d = Math.hypot(dx, dy) + 0.01;
+
+    let strength = c.size * 2000 / (d * d);
+
+    gx += strength * (dx / d);
+    gy += strength * (dy / d);
+  });
+
+  return { x: gx, y: gy };
+}
+
+// ---- SIMULATION LOOP ----
+function step() {
+  let grad = computeGradient(pos);
+
+  pos.x -= STEP_SIZE * grad.x * 0.01;
+  pos.y -= STEP_SIZE * grad.y * 0.01;
+
+  path.push({ x: pos.x, y: pos.y });
+}
+
+// ---- DRAW ----
+function draw() {
+  ctx.clearRect(0, 0, WIDTH, HEIGHT);
+
+  // Draw points
+  ctx.fillStyle = "#475569";
+  points.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Draw clusters
+  clusterCenters.forEach(c => {
+    ctx.fillStyle = "rgba(255,0,0,0.2)";
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, 10 + c.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Draw path
+  ctx.strokeStyle = "#22c55e";
+  ctx.beginPath();
+  for (let i = 0; i < path.length; i++) {
+    let p = path[i];
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  }
+  ctx.stroke();
+
+  // Draw start & goal
+  ctx.fillStyle = "#3b82f6";
+  ctx.beginPath();
+  ctx.arc(50, 50, 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#facc15";
+  ctx.beginPath();
+  ctx.arc(goal.x, goal.y, 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Robot
+  ctx.fillStyle = "#22c55e";
+  ctx.beginPath();
+  ctx.arc(pos.x, pos.y, 5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ---- LOOP ----
+function animate() {
+  for (let i = 0; i < 3; i++) step();
+  draw();
+  requestAnimationFrame(animate);
+}
+
+animate();
+
+</script>
+
+</body>
+</html>
